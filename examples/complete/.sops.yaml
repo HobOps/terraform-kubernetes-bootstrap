@@ -1,0 +1,7 @@
+# Example: encrypt the Terraform state encryption key with GCP KMS.
+# Adjust project / keyRing / cryptoKey for your environment.
+creation_rules:
+- path_regex: encryption_key.txt
+  gcp_kms: projects/my-gcp-project/locations/global/keyRings/terraform/cryptoKeys/sops-key
+- path_regex: secrets\.enc\.yaml$
+  gcp_kms: projects/my-gcp-project/locations/global/keyRings/terraform/cryptoKeys/sops-key
