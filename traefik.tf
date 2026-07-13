@@ -1,28 +1,59 @@
-# Enable Traefik's Kubernetes Gateway API provider via k3s HelmChartConfig
-# (Traefik Gateway is disabled by default on k3s). Skip this path on clusters
-# that manage Traefik differently; GatewayClass / Gateway are still created below.
-resource "kubectl_manifest" "traefik_helmchartconfig" {
+# Gateway API CRDs. The official Traefik chart stopped shipping them, so they
+# must exist before the kubernetesGateway provider starts and before the
+# GatewayClass / Gateway below are applied.
+data "http" "gateway_api_crds" {
   count = var.enable_traefik_gateway ? 1 : 0
 
-  yaml_body = yamlencode({
-    apiVersion = "helm.cattle.io/v1"
-    kind       = "HelmChartConfig"
-    metadata = {
-      name      = "traefik"
-      namespace = "kube-system"
-    }
-    spec = {
-      valuesContent = <<-VALUES
-        providers:
-          kubernetesGateway:
-            enabled: true
-        gateway:
-          enabled: false
-        gatewayClass:
-          enabled: false
-      VALUES
-    }
-  })
+  url = "https://github.com/kubernetes-sigs/gateway-api/releases/download/${var.gateway_api_version}/standard-install.yaml"
+}
+
+data "kubectl_file_documents" "gateway_api_crds" {
+  count = var.enable_traefik_gateway ? 1 : 0
+
+  content = data.http.gateway_api_crds[0].response_body
+}
+
+resource "kubectl_manifest" "gateway_api_crds" {
+  for_each = var.enable_traefik_gateway ? data.kubectl_file_documents.gateway_api_crds[0].manifests : {}
+
+  yaml_body         = each.value
+  server_side_apply = true
+  # Take over CRDs previously owned by another manager (e.g. the k3s
+  # traefik-crd Helm release, kept in-cluster via helm.sh/resource-policy).
+  force_conflicts = true
+}
+
+# Install Traefik from the official Helm chart with the Kubernetes Gateway API
+# provider enabled. Assumes the k3s-embedded Traefik is disabled on the cluster
+# (--disable=traefik); the chart's own Gateway/GatewayClass are disabled because
+# they are managed below.
+resource "helm_release" "traefik" {
+  count = var.enable_traefik_gateway ? 1 : 0
+
+  name             = "traefik"
+  repository       = "https://traefik.github.io/charts"
+  chart            = "traefik"
+  version          = local.chart_versions.traefik
+  namespace        = "traefik"
+  create_namespace = true
+
+  values = [
+    yamlencode({
+      providers = {
+        kubernetesGateway = {
+          enabled = true
+        }
+      }
+      gateway = {
+        enabled = false
+      }
+      gatewayClass = {
+        enabled = false
+      }
+    })
+  ]
+
+  depends_on = [kubectl_manifest.gateway_api_crds]
 }
 
 resource "kubectl_manifest" "gatewayclass_traefik" {
@@ -39,7 +70,7 @@ resource "kubectl_manifest" "gatewayclass_traefik" {
     }
   })
 
-  depends_on = [kubectl_manifest.traefik_helmchartconfig]
+  depends_on = [helm_release.traefik]
 }
 
 # Shared public Gateway. Listener ports must match Traefik entryPoints (8000/8443),

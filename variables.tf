@@ -17,7 +17,7 @@ variable "enable_kube_vip" {
 }
 
 variable "enable_traefik_gateway" {
-  description = "Configure Traefik Gateway API (HelmChartConfig, GatewayClass, shared Gateway). HTTPS listener needs enable_cert_manager for the Certificate."
+  description = "Install Traefik (official Helm chart) with Gateway API (CRDs, GatewayClass, shared Gateway). Assumes the k3s-embedded Traefik is disabled. HTTPS listener needs enable_cert_manager for the Certificate."
   type        = bool
   default     = false
 }
@@ -67,6 +67,12 @@ variable "vip_interface" {
 }
 
 # --- Traefik Gateway ---
+
+variable "gateway_api_version" {
+  description = "Kubernetes Gateway API release (standard channel CRDs). The Traefik chart no longer ships these CRDs."
+  type        = string
+  default     = "v1.5.1"
+}
 
 variable "gateway_name" {
   description = "Name of the shared Gateway resource."
@@ -193,6 +199,7 @@ variable "chart_versions" {
   type = object({
     kube_vip                = optional(string)
     kube_vip_cloud_provider = optional(string)
+    traefik                 = optional(string)
     cert_manager            = optional(string)
     argocd                  = optional(string)
     external_dns            = optional(string)
@@ -206,6 +213,7 @@ locals {
   chart_versions = {
     kube_vip                = coalesce(try(var.chart_versions.kube_vip, null), "0.9.9")
     kube_vip_cloud_provider = coalesce(try(var.chart_versions.kube_vip_cloud_provider, null), "0.2.10")
+    traefik                 = coalesce(try(var.chart_versions.traefik, null), "41.0.2")
     cert_manager            = coalesce(try(var.chart_versions.cert_manager, null), "v1.20.3")
     argocd                  = coalesce(try(var.chart_versions.argocd, null), "10.1.2")
     external_dns            = coalesce(try(var.chart_versions.external_dns, null), "1.21.1")

@@ -7,16 +7,17 @@ enable what you need with `enable_*` flags.
 Providers (`helm`, `kubernetes`, `kubectl`) are configured by the **caller**.
 
 > **Scope today:** several components assume a Traefik + Gateway API setup and
-> (optionally) kube-vip / k3s `HelmChartConfig`. The module is named and
-> structured to grow toward any Kubernetes distribution; distribution-specific
-> pieces remain behind feature flags.
+> (optionally) kube-vip. Traefik is installed from the official Helm chart, so
+> on k3s the embedded Traefik must be disabled (`--disable=traefik`). The module
+> is named and structured to grow toward any Kubernetes distribution;
+> distribution-specific pieces remain behind feature flags.
 
 ## Components
 
 | Flag | Component |
 |------|-----------|
 | `enable_kube_vip` | kube-vip + kube-vip-cloud-provider |
-| `enable_traefik_gateway` | Traefik Gateway API (HelmChartConfig, GatewayClass, Gateway) |
+| `enable_traefik_gateway` | Traefik (official Helm chart) + Gateway API (CRDs, GatewayClass, Gateway) |
 | `enable_cert_manager` | cert-manager + ClusterIssuers (HTTP-01 + DNS-01) |
 | `enable_argocd` | Argo CD + repo secret + bootstrap Application (`directory.recurse: true` on `gitops_path`) |
 | `enable_external_dns` | external-dns (GCP) |
@@ -49,7 +50,7 @@ flowchart TD
 | Component | Depends on | Why |
 |-----------|------------|-----|
 | **kube-vip** | — | Independent; needs `vip` / `vip_interface` |
-| **Traefik Gateway** | — for HTTP; **cert-manager** for HTTPS Certificate | `public_gateway_certificate` only when both flags are true |
+| **Traefik Gateway** | — for HTTP; **cert-manager** for HTTPS Certificate | Installs Gateway API CRDs + Traefik chart; `public_gateway_certificate` only when both flags are true |
 | **cert-manager** | — | Needs `acme_email`, `letsencrypt_dns_zones`, `gcp_dns_credentials_json` |
 | **Argo CD** | **Traefik Gateway** + **cert-manager** | HTTPRoute + Gateway TLS; plan fails if Argo is enabled without both |
 | **external-dns** | — | Needs GCP credentials and domain filters |
@@ -108,6 +109,7 @@ See [`examples/complete`](examples/complete) for a full thin wrapper (providers,
 | helm | >= 3.0, < 4 |
 | kubernetes | >= 2.30, < 3 |
 | kubectl | ~> 2.1 |
+| http | >= 3.0, < 4 |
 
 ## Repository layout
 
