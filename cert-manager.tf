@@ -20,7 +20,7 @@ resource "helm_release" "cert_manager" {
 # Service account key used by the DNS-01 solver (Google Cloud DNS).
 resource "kubernetes_secret" "letsencrypt_dns01_credentials" {
   count = var.enable_cert_manager ? 1 : 0
-  
+
   metadata {
     name      = "letsencrypt-dns01-credentials"
     namespace = "cert-manager"
