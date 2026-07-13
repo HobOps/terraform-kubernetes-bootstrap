@@ -5,7 +5,7 @@ resource "helm_release" "cert_manager" {
   repository       = "https://charts.jetstack.io"
   chart            = "cert-manager"
   version          = local.chart_versions.cert_manager
-  namespace        = "infrastructure"
+  namespace        = "cert-manager"
   create_namespace = true
 
   values = [
@@ -20,10 +20,10 @@ resource "helm_release" "cert_manager" {
 # Service account key used by the DNS-01 solver (Google Cloud DNS).
 resource "kubernetes_secret" "letsencrypt_dns01_credentials" {
   count = var.enable_cert_manager ? 1 : 0
-
+  
   metadata {
     name      = "letsencrypt-dns01-credentials"
-    namespace = "infrastructure"
+    namespace = "cert-manager"
   }
   data = {
     "credentials.json" = var.gcp_dns_credentials_json
