@@ -38,19 +38,28 @@ resource "helm_release" "traefik" {
   create_namespace = true
 
   values = [
-    yamlencode({
-      providers = {
-        kubernetesGateway = {
-          enabled = true
+    yamlencode(merge(
+      {
+        providers = {
+          kubernetesGateway = {
+            enabled = true
+          }
         }
-      }
-      gateway = {
-        enabled = false
-      }
-      gatewayClass = {
-        enabled = false
-      }
-    })
+        gateway = {
+          enabled = false
+        }
+        gatewayClass = {
+          enabled = false
+        }
+      },
+      var.traefik_load_balancer_ip != null ? {
+        service = {
+          spec = {
+            loadBalancerIP = var.traefik_load_balancer_ip
+          }
+        }
+      } : {}
+    ))
   ]
 
   depends_on = [kubectl_manifest.gateway_api_crds]

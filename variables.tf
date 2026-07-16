@@ -68,6 +68,12 @@ variable "vip_interface" {
 
 # --- Traefik Gateway ---
 
+variable "traefik_load_balancer_ip" {
+  description = "Optional static IP for the Traefik LoadBalancer Service. Leave null to let the cloud assign one."
+  type        = string
+  default     = null
+}
+
 variable "gateway_api_version" {
   description = "Kubernetes Gateway API release (standard channel CRDs). The Traefik chart no longer ships these CRDs."
   type        = string
