@@ -71,5 +71,5 @@ resource "helm_release" "external_dns" {
     })
   ]
 
-  depends_on = [kubernetes_secret.external_dns_gcp_credentials]
+  depends_on = [kubernetes_secret.external_dns_gcp_credentials, helm_release.cilium]
 }

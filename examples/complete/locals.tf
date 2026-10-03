@@ -2,8 +2,33 @@ locals {
   kube_context = "example-c1"
   project_id   = "my-gcp-project"
 
-  vip           = "10.0.0.50"
-  vip_interface = "eth0"
+  # The API VIP is not managed here: kube-vip is deployed with the cluster
+  # (k3s manifest), see the module README.
+  cilium_values = {
+    devices               = ["eth0"]
+    routingMode           = "native"
+    autoDirectNodeRoutes  = true
+    ipv4NativeRoutingCIDR = "10.42.0.0/16"
+  }
+  cilium_bgp = {
+    local_asn = 64620
+    peers = [
+      { name = "router-v4", address = "10.0.0.1", asn = 65101, families = ["ipv4"] },
+    ]
+  }
+  cilium_lb_ip_pools = {
+    gateway = {
+      blocks           = ["10.0.0.29/32"]
+      service_selector = { matchLabels = { "lb-pool" = "gateway" } }
+    }
+  }
+  cilium_bgp_advertisements = {
+    gateway = [{
+      advertisementType = "Service"
+      service           = { addresses = ["LoadBalancerIP"] }
+      selector          = { matchLabels = { "lb-pool" = "gateway" } }
+    }]
+  }
 
   argocd_hostname = "argocd.c1.example.com"
   gitops_repo_url = "git@github.com:org/infra.git"
@@ -29,22 +54,20 @@ locals {
   argocd_admin_accounts       = "apiKey, login"
 
   # Feature flags (module defaults are false; enable what this cluster needs).
-  enable_kube_vip        = true
-  enable_traefik_gateway = true
-  enable_cert_manager    = true
-  enable_argocd          = true
-  enable_external_dns    = true
-  enable_reloader        = true
-  enable_gitea_actions   = false
-  gitea_root_url         = null
+  enable_gateway       = true
+  enable_cert_manager  = true
+  enable_argocd        = true
+  enable_external_dns  = true
+  enable_reloader      = true
+  enable_gitea_actions = false
+  gitea_root_url       = null
 
   chart_versions = {
-    kube_vip                = "0.9.9"
-    kube_vip_cloud_provider = "0.2.10"
-    cert_manager            = "v1.20.3"
-    argocd                  = "10.1.2"
-    external_dns            = "1.21.1"
-    reloader                = "2.2.14"
-    gitea_actions           = "0.1.1"
+    cilium        = "1.20.2"
+    cert_manager  = "v1.20.3"
+    argocd        = "10.1.2"
+    external_dns  = "1.21.1"
+    reloader      = "2.2.14"
+    gitea_actions = "0.1.1"
   }
 }
