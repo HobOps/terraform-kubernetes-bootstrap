@@ -13,16 +13,18 @@ module "bootstrap" {
   cluster_name = local.kube_context
   project_id   = local.project_id
 
-  enable_kube_vip        = local.enable_kube_vip
-  enable_traefik_gateway = local.enable_traefik_gateway
-  enable_cert_manager    = local.enable_cert_manager
-  enable_argocd          = local.enable_argocd
-  enable_external_dns    = local.enable_external_dns
-  enable_reloader        = local.enable_reloader
-  enable_gitea_actions   = local.enable_gitea_actions
+  enable_gateway       = local.enable_gateway
+  enable_cert_manager  = local.enable_cert_manager
+  enable_argocd        = local.enable_argocd
+  enable_external_dns  = local.enable_external_dns
+  enable_reloader      = local.enable_reloader
+  enable_gitea_actions = local.enable_gitea_actions
 
-  vip           = local.vip
-  vip_interface = local.vip_interface
+  cilium_values             = local.cilium_values
+  cilium_bgp                = local.cilium_bgp
+  cilium_lb_ip_pools        = local.cilium_lb_ip_pools
+  cilium_bgp_advertisements = local.cilium_bgp_advertisements
+  gateway_infrastructure    = { labels = { "lb-pool" = "gateway" } }
 
   argocd_hostname = local.argocd_hostname
   gitops_repo_url = local.gitops_repo_url

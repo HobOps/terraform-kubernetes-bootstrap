@@ -10,14 +10,14 @@ variable "project_id" {
 
 # --- Feature flags (all off by default) ---
 
-variable "enable_kube_vip" {
-  description = "Install kube-vip and kube-vip-cloud-provider."
+variable "enable_cilium" {
+  description = "Install Cilium (CNI, kube-proxy replacement, LoadBalancer IPAM + BGP, Gateway API). The cluster must have no CNI and no kube-proxy. Everything that needs pods waits for it, so a fresh cluster bootstraps in one apply."
   type        = bool
-  default     = false
+  default     = true
 }
 
-variable "enable_traefik_gateway" {
-  description = "Install Traefik (official Helm chart) with Gateway API (CRDs, GatewayClass, shared Gateway). Assumes the k3s-embedded Traefik is disabled. HTTPS listener needs enable_cert_manager for the Certificate."
+variable "enable_gateway" {
+  description = "Install the Gateway API CRDs, the shared public Gateway (class \"cilium\") and, with enable_cert_manager, its TLS Certificate. Enables Cilium's Gateway API controller."
   type        = bool
   default     = false
 }
@@ -29,7 +29,7 @@ variable "enable_cert_manager" {
 }
 
 variable "enable_argocd" {
-  description = "Install Argo CD, repo secret, and bootstrap Application. Requires enable_traefik_gateway and enable_cert_manager for HTTPRoute TLS."
+  description = "Install Argo CD, repo secret, and bootstrap Application. Requires enable_gateway and enable_cert_manager for HTTPRoute TLS."
   type        = bool
   default     = false
 }
@@ -54,30 +54,85 @@ variable "enable_gitea_actions" {
 
 # --- kube-vip ---
 
-variable "vip" {
-  description = "Layer-2 VIP for the Kubernetes API and LoadBalancer services (kube-vip)."
-  type        = string
-  default     = null
-}
-
-variable "vip_interface" {
-  description = "Host network interface where kube-vip binds the VIP."
-  type        = string
-  default     = "eth0"
-}
-
 # --- Traefik Gateway ---
 
-variable "traefik_load_balancer_ip" {
-  description = "Optional static IP for the Traefik LoadBalancer Service. Leave null to let the cloud assign one."
+# --- Cilium ---
+
+variable "cilium_k8s_service_host" {
+  description = "API server address Cilium uses (it replaces kube-proxy, so it cannot use the kubernetes Service). Default: the k3s client-side load balancer present on every node."
   type        = string
-  default     = null
+  default     = "127.0.0.1"
+}
+
+variable "cilium_k8s_service_port" {
+  description = "API server port for cilium_k8s_service_host (k3s client-side load balancer: 6444)."
+  type        = number
+  default     = 6444
+}
+
+variable "cilium_values" {
+  description = "Extra Helm values for Cilium, merged over the module defaults (kube-proxy replacement, IPAM from the node podCIDRs, 2 operator replicas, BGP and Gateway API toggles). Put cluster-specific settings here: devices, routingMode, native routing CIDRs, ipv6, encryption, hubble."
+  type        = any
+  default     = {}
+}
+
+variable "cilium_bgp" {
+  description = "Cilium BGP control plane: one instance on the selected nodes with these peers. Peers take every CiliumBGPAdvertisement carrying advertisement_labels. Editing timers, families or graceful restart resets every node's session at once (do it in a maintenance window). null disables BGP."
+  type = object({
+    name                 = optional(string, "default")
+    local_asn            = number
+    node_selector        = optional(map(string), { "kubernetes.io/os" = "linux" })
+    advertisement_labels = optional(map(string), { advertise = "bgp" })
+    peers = list(object({
+      name                     = string
+      address                  = string
+      asn                      = number
+      families                 = optional(list(string), ["ipv4"])
+      keepalive_seconds        = optional(number, 3)
+      hold_seconds             = optional(number, 9)
+      connect_retry_seconds    = optional(number, 5)
+      graceful_restart_seconds = optional(number) # null = graceful restart off
+    }))
+  })
+  default = null
+}
+
+variable "cilium_lb_ip_pools" {
+  description = "Cilium LoadBalancer IPAM pools: name => CIDR blocks and an optional serviceSelector (a Kubernetes label selector)."
+  type = map(object({
+    blocks           = list(string)
+    service_selector = optional(any)
+  }))
+  default = {}
+}
+
+variable "cilium_bgp_advertisements" {
+  description = "CiliumBGPAdvertisement objects: name => list of spec.advertisements entries. They get cilium_bgp.advertisement_labels, so the peers pick them up."
+  type        = map(list(any))
+  default     = {}
+}
+
+# --- Gateway ---
+
+variable "gateway_infrastructure" {
+  description = "Optional spec.infrastructure of the public Gateway: annotations and labels Cilium copies to the Gateway's LoadBalancer Service (e.g. an LB IPAM pool label and lbipam.cilium.io/ips for a fixed IP)."
+  type = object({
+    annotations = optional(map(string), {})
+    labels      = optional(map(string), {})
+  })
+  default = null
 }
 
 variable "gateway_api_version" {
-  description = "Kubernetes Gateway API release (standard channel CRDs). The Traefik chart no longer ships these CRDs."
+  description = "Kubernetes Gateway API release (standard channel CRDs). Must be the one the Cilium version supports (Cilium 1.20: v1.6.1)."
   type        = string
-  default     = "v1.5.1"
+  default     = "v1.6.1"
+}
+
+variable "create_gateway_namespace" {
+  description = "Create gateway_namespace. Set to false if it already exists."
+  type        = bool
+  default     = true
 }
 
 variable "gateway_name" {
@@ -203,30 +258,26 @@ variable "gitea_runner_registration_token" {
 variable "chart_versions" {
   description = "Helm chart versions for platform components. Omitted keys use module defaults."
   type = object({
-    kube_vip                = optional(string)
-    kube_vip_cloud_provider = optional(string)
-    traefik                 = optional(string)
-    cert_manager            = optional(string)
-    argocd                  = optional(string)
-    external_dns            = optional(string)
-    reloader                = optional(string)
-    gitea_actions           = optional(string)
+    cilium        = optional(string)
+    cert_manager  = optional(string)
+    argocd        = optional(string)
+    external_dns  = optional(string)
+    reloader      = optional(string)
+    gitea_actions = optional(string)
   })
   default = {}
 }
 
 locals {
   chart_versions = {
-    kube_vip                = coalesce(try(var.chart_versions.kube_vip, null), "0.9.9")
-    kube_vip_cloud_provider = coalesce(try(var.chart_versions.kube_vip_cloud_provider, null), "0.2.10")
-    traefik                 = coalesce(try(var.chart_versions.traefik, null), "41.0.2")
-    cert_manager            = coalesce(try(var.chart_versions.cert_manager, null), "v1.20.3")
-    argocd                  = coalesce(try(var.chart_versions.argocd, null), "10.1.2")
-    external_dns            = coalesce(try(var.chart_versions.external_dns, null), "1.21.1")
-    reloader                = coalesce(try(var.chart_versions.reloader, null), "2.2.14")
-    gitea_actions           = coalesce(try(var.chart_versions.gitea_actions, null), "0.1.1")
+    cilium        = coalesce(try(var.chart_versions.cilium, null), "1.20.2")
+    cert_manager  = coalesce(try(var.chart_versions.cert_manager, null), "v1.20.3")
+    argocd        = coalesce(try(var.chart_versions.argocd, null), "10.1.2")
+    external_dns  = coalesce(try(var.chart_versions.external_dns, null), "1.21.1")
+    reloader      = coalesce(try(var.chart_versions.reloader, null), "2.2.14")
+    gitea_actions = coalesce(try(var.chart_versions.gitea_actions, null), "0.1.1")
   }
 
-  # Gateway TLS Certificate needs both Traefik Gateway and cert-manager.
-  enable_gateway_certificate = var.enable_traefik_gateway && var.enable_cert_manager
+  # Gateway TLS Certificate needs both the Gateway and cert-manager.
+  enable_gateway_certificate = var.enable_gateway && var.enable_cert_manager
 }

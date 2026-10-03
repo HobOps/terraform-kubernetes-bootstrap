@@ -29,4 +29,6 @@ resource "helm_release" "reloader" {
       }
     })
   ]
+
+  depends_on = [helm_release.cilium]
 }

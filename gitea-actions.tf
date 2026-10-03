@@ -80,5 +80,5 @@ resource "helm_release" "gitea_actions" {
     })
   ]
 
-  depends_on = [kubernetes_secret.gitea_runner_token]
+  depends_on = [kubernetes_secret.gitea_runner_token, helm_release.cilium]
 }

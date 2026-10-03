@@ -64,12 +64,13 @@ resource "helm_release" "argocd" {
 
   lifecycle {
     precondition {
-      condition     = var.enable_traefik_gateway && var.enable_cert_manager
-      error_message = "enable_argocd requires enable_traefik_gateway and enable_cert_manager (HTTPRoute + Gateway TLS)."
+      condition     = var.enable_gateway && var.enable_cert_manager
+      error_message = "enable_argocd requires enable_gateway and enable_cert_manager (HTTPRoute + Gateway TLS)."
     }
   }
 
   depends_on = [
+    helm_release.cilium,
     kubectl_manifest.clusterissuer_letsencrypt,
     kubectl_manifest.clusterissuer_letsencrypt_dns01,
     kubectl_manifest.public_gateway,

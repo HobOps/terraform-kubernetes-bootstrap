@@ -13,8 +13,17 @@ resource "helm_release" "cert_manager" {
       crds = {
         enabled = true
       }
+      # HTTP-01 challenges are served through the shared Gateway (gatewayHTTPRoute).
+      config = {
+        apiVersion       = "controller.config.cert-manager.io/v1alpha1"
+        kind             = "ControllerConfiguration"
+        enableGatewayAPI = var.enable_gateway
+      }
     })
   ]
+
+  # Needs pods (CNI) and, for enableGatewayAPI, the Gateway API CRDs.
+  depends_on = [helm_release.cilium, kubectl_manifest.gateway_api_crds]
 }
 
 # Service account key used by the DNS-01 solver (Google Cloud DNS).
@@ -52,8 +61,14 @@ resource "kubectl_manifest" "clusterissuer_letsencrypt" {
         solvers = [
           {
             http01 = {
-              ingress = {
-                class = "traefik"
+              gatewayHTTPRoute = {
+                parentRefs = [
+                  {
+                    name        = var.gateway_name
+                    namespace   = var.gateway_namespace
+                    sectionName = "http"
+                  },
+                ]
               }
             }
           },
