@@ -115,8 +115,9 @@ resource "kubectl_manifest" "argocd_bootstrap" {
   depends_on = [helm_release.argocd]
 }
 
+# SSH deploy-key repository secret (argocd_repo_auth = "ssh").
 resource "kubernetes_secret" "argocd_repo" {
-  count = var.enable_argocd ? 1 : 0
+  count = var.enable_argocd && var.argocd_repo_auth == "ssh" ? 1 : 0
 
   metadata {
     name      = "argocd-repo"
@@ -133,6 +134,40 @@ resource "kubernetes_secret" "argocd_repo" {
     enableLfs     = "true"
     insecure      = "false"
     sshPrivateKey = var.argocd_repo_ssh_private_key
+  }
+
+  depends_on = [helm_release.argocd]
+}
+
+# GitHub App credential template (argocd_repo_auth = "github_app"). A repo-creds
+# entry matches every repository whose URL starts with `url`.
+resource "kubernetes_secret" "argocd_repo_github_app" {
+  count = var.enable_argocd && var.argocd_repo_auth == "github_app" ? 1 : 0
+
+  metadata {
+    name      = "argocd-repo-github-app"
+    namespace = "argocd"
+    labels = {
+      "argocd.argoproj.io/secret-type" = "repo-creds"
+    }
+  }
+  data = {
+    url                     = coalesce(var.argocd_github_app_url, try(regex("^(.*)/[^/]+/?$", var.gitops_repo_url)[0], var.gitops_repo_url))
+    type                    = "git"
+    githubAppID             = var.argocd_github_app_id
+    githubAppInstallationID = var.argocd_github_app_installation_id
+    githubAppPrivateKey     = var.argocd_github_app_private_key
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        var.argocd_github_app_id != null &&
+        var.argocd_github_app_installation_id != null &&
+        var.argocd_github_app_private_key != null
+      )
+      error_message = "argocd_repo_auth = \"github_app\" requires argocd_github_app_id, argocd_github_app_installation_id and argocd_github_app_private_key."
+    }
   }
 
   depends_on = [helm_release.argocd]

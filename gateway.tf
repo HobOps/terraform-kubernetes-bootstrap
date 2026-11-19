@@ -1,10 +1,11 @@
-# Gateway API for the shared public Gateway, implemented by Cilium (cilium.tf).
-# The CRDs come first: Cilium only enables its Gateway API controller if they
-# exist when the operator starts, so helm_release.cilium depends on them.
+# Gateway API for the shared public Gateway, implemented by Cilium (cilium.tf)
+# or Traefik (traefik.tf), see gateway_controller. The CRDs come first: Cilium
+# only enables its Gateway API controller if they exist when the operator
+# starts, so helm_release.cilium (and helm_release.traefik) depend on them.
 data "http" "gateway_api_crds" {
   count = var.enable_gateway ? 1 : 0
 
-  url = "https://github.com/kubernetes-sigs/gateway-api/releases/download/${var.gateway_api_version}/standard-install.yaml"
+  url = "https://github.com/kubernetes-sigs/gateway-api/releases/download/${var.gateway_api_version}/${var.gateway_api_channel}-install.yaml"
 }
 
 data "kubectl_file_documents" "gateway_api_crds" {
@@ -56,9 +57,11 @@ resource "kubectl_manifest" "public_gateway_certificate" {
   ]
 }
 
-# Shared public Gateway (class "cilium", created by Cilium). Cilium creates its
-# LoadBalancer Service; gateway_infrastructure labels/annotates it (LB IPAM
-# pool, fixed IP).
+# Shared public Gateway (class "cilium" or "traefik", per gateway_controller).
+# With Cilium, Cilium creates its LoadBalancer Service and
+# gateway_infrastructure labels/annotates it (LB IPAM pool, fixed IP). With
+# Traefik, the chart's Service fronts it and listener ports are Traefik's
+# entryPoint ports (8000/8443), not the Service ports.
 resource "kubectl_manifest" "public_gateway" {
   count = var.enable_gateway ? 1 : 0
 
@@ -70,12 +73,12 @@ resource "kubectl_manifest" "public_gateway" {
       namespace = var.gateway_namespace
     }
     spec = merge({
-      gatewayClassName = "cilium"
+      gatewayClassName = var.gateway_controller
       listeners = concat([
         {
           name     = "http"
           protocol = "HTTP"
-          port     = 80
+          port     = local.gateway_listener_ports.http
           allowedRoutes = {
             namespaces = {
               from = "All"
@@ -86,15 +89,15 @@ resource "kubectl_manifest" "public_gateway" {
         {
           name     = "https"
           protocol = "HTTPS"
-          port     = 443
+          port     = local.gateway_listener_ports.https
           tls = {
             mode = "Terminate"
-            certificateRefs = [
+            certificateRefs = concat([
               {
                 kind = "Secret"
                 name = var.gateway_tls_secret
               }
-            ]
+            ], [for name in var.gateway_extra_tls_secrets : { kind = "Secret", name = name }])
           }
           allowedRoutes = {
             namespaces = {
@@ -108,9 +111,17 @@ resource "kubectl_manifest" "public_gateway" {
     })
   })
 
+  lifecycle {
+    precondition {
+      condition     = var.gateway_controller != "cilium" || var.enable_cilium
+      error_message = "gateway_controller = \"cilium\" requires enable_cilium. Without Cilium (e.g. GKE), use gateway_controller = \"traefik\"."
+    }
+  }
+
   depends_on = [
     kubernetes_namespace.gateway,
     helm_release.cilium,
+    kubectl_manifest.gatewayclass_traefik,
     kubectl_manifest.public_gateway_certificate,
   ]
 }

@@ -97,7 +97,7 @@ resource "kubectl_manifest" "clusterissuer_letsencrypt_dns01" {
         privateKeySecretRef = {
           name = "letsencrypt-dns01"
         }
-        solvers = [
+        solvers = concat([
           {
             dns01 = {
               cloudDNS = {
@@ -112,7 +112,22 @@ resource "kubectl_manifest" "clusterissuer_letsencrypt_dns01" {
               dnsZones = var.letsencrypt_dns_zones
             }
           },
-        ]
+          ], [
+          for extra in var.letsencrypt_extra_dns01_solvers : {
+            dns01 = {
+              cloudDNS = {
+                project = extra.project
+                serviceAccountSecretRef = {
+                  key  = "credentials.json"
+                  name = kubernetes_secret.letsencrypt_dns01_credentials[0].metadata[0].name
+                }
+              }
+            }
+            selector = {
+              dnsZones = extra.dns_zones
+            }
+          }
+        ])
       }
     }
   })
