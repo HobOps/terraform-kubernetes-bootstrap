@@ -46,15 +46,17 @@ variable "enable_reloader" {
   default     = false
 }
 
+variable "enable_external_secrets" {
+  description = "Install External Secrets Operator, the Vault AppRole auth Secret, and the ClusterSecretStores in external_secrets_cluster_secret_stores."
+  type        = bool
+  default     = false
+}
+
 variable "enable_gitea_actions" {
   description = "Install Gitea Actions runners."
   type        = bool
   default     = false
 }
-
-# --- kube-vip ---
-
-# --- Traefik Gateway ---
 
 # --- Cilium ---
 
@@ -114,6 +116,17 @@ variable "cilium_bgp_advertisements" {
 
 # --- Gateway ---
 
+variable "gateway_controller" {
+  description = "Gateway API controller for the shared Gateway: \"cilium\" (needs enable_cilium) or \"traefik\" (installs Traefik, see traefik.tf; for clusters with their own CNI such as GKE). Also the GatewayClass name."
+  type        = string
+  default     = "cilium"
+
+  validation {
+    condition     = contains(["cilium", "traefik"], var.gateway_controller)
+    error_message = "gateway_controller must be \"cilium\" or \"traefik\"."
+  }
+}
+
 variable "gateway_infrastructure" {
   description = "Optional spec.infrastructure of the public Gateway: annotations and labels Cilium copies to the Gateway's LoadBalancer Service (e.g. an LB IPAM pool label and lbipam.cilium.io/ips for a fixed IP)."
   type = object({
@@ -127,6 +140,17 @@ variable "gateway_api_version" {
   description = "Kubernetes Gateway API release (standard channel CRDs). Must be the one the Cilium version supports (Cilium 1.20: v1.6.1)."
   type        = string
   default     = "v1.6.1"
+}
+
+variable "gateway_api_channel" {
+  description = "Gateway API CRD channel to install: \"standard\" or \"experimental\". Managed clusters (e.g. GKE) may enforce the standard channel via admission policy, which excludes TCPRoute/UDPRoute; with Traefik, expose raw TCP with traefik_tcp_listeners instead."
+  type        = string
+  default     = "standard"
+
+  validation {
+    condition     = contains(["standard", "experimental"], var.gateway_api_channel)
+    error_message = "gateway_api_channel must be \"standard\" or \"experimental\"."
+  }
 }
 
 variable "create_gateway_namespace" {
@@ -159,6 +183,40 @@ variable "gateway_tls_dns_names" {
   default     = []
 }
 
+variable "gateway_extra_tls_secrets" {
+  description = "Extra TLS Secrets (same namespace as the Gateway) attached to the HTTPS listener; the controller picks the certificate by SNI."
+  type        = list(string)
+  default     = []
+}
+
+# --- Traefik (gateway_controller = "traefik") ---
+
+variable "traefik_load_balancer_ip" {
+  description = "Optional static IP for the Traefik LoadBalancer Service. Leave null to let the cloud assign one."
+  type        = string
+  default     = null
+}
+
+variable "traefik_forwarded_trusted_ips" {
+  description = "CIDRs Traefik trusts in X-Forwarded-* headers on the web and websecure entryPoints (forwardedHeaders.trustedIPs). Set it to the fronting L7 load balancer ranges plus the in-cluster peer range so Traefik keeps the real client IP instead of the upstream proxy IP. Empty keeps the chart default (not trusted)."
+  type        = list(string)
+  default     = []
+}
+
+variable "traefik_tcp_listeners" {
+  description = "Extra raw-TCP entryPoints opened on the Traefik LoadBalancer Service (name => { port }), exposed on the shared LB IP. Route to them with a Traefik IngressRouteTCP that references the entryPoint by name. Use this where the Gateway API experimental channel (TCPRoute) is unavailable."
+  type = map(object({
+    port = number
+  }))
+  default = {}
+}
+
+variable "traefik_values" {
+  description = "Extra Traefik chart values, merged deeply over the module's (e.g. additional TCP entryPoints under ports)."
+  type        = any
+  default     = {}
+}
+
 # --- cert-manager ---
 
 variable "acme_email" {
@@ -171,6 +229,15 @@ variable "letsencrypt_dns_zones" {
   description = "DNS zones for the DNS-01 ClusterIssuer selector."
   type        = list(string)
   default     = []
+}
+
+variable "letsencrypt_extra_dns01_solvers" {
+  description = "Extra DNS-01 solvers for zones hosted in other GCP projects. Same DNS credentials; the service account needs DNS rights on those zones."
+  type = list(object({
+    project   = string
+    dns_zones = list(string)
+  }))
+  default = []
 }
 
 variable "gcp_dns_credentials_json" {
@@ -206,11 +273,47 @@ variable "gitops_target_revision" {
   default     = "main"
 }
 
+variable "argocd_repo_auth" {
+  description = "How Argo CD authenticates to the gitops repository: \"ssh\" (argocd_repo_ssh_private_key) or \"github_app\" (argocd_github_app_*)."
+  type        = string
+  default     = "ssh"
+
+  validation {
+    condition     = contains(["ssh", "github_app"], var.argocd_repo_auth)
+    error_message = "argocd_repo_auth must be \"ssh\" or \"github_app\"."
+  }
+}
+
 variable "argocd_repo_ssh_private_key" {
-  description = "SSH deploy key for the gitops repository."
+  description = "SSH deploy key for the gitops repository (argocd_repo_auth = \"ssh\")."
   type        = string
   default     = null
   sensitive   = true
+}
+
+variable "argocd_github_app_id" {
+  description = "GitHub App ID for the gitops repository (argocd_repo_auth = \"github_app\")."
+  type        = string
+  default     = null
+}
+
+variable "argocd_github_app_installation_id" {
+  description = "GitHub App installation ID on the org/repo (argocd_repo_auth = \"github_app\")."
+  type        = string
+  default     = null
+}
+
+variable "argocd_github_app_private_key" {
+  description = "GitHub App private key (PEM) for the gitops repository (argocd_repo_auth = \"github_app\")."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "argocd_github_app_url" {
+  description = "URL prefix the GitHub App credential template (repo-creds) matches. null derives it from gitops_repo_url by dropping the repository segment (e.g. https://github.com/org/repo.git => https://github.com/org)."
+  type        = string
+  default     = null
 }
 
 variable "argocd_admin_password_bcrypt" {
@@ -240,6 +343,42 @@ variable "external_dns_domain_filters" {
   default     = []
 }
 
+# --- External Secrets ---
+
+variable "external_secrets_vault_server" {
+  description = "Vault server URL (e.g. https://vault.example.com) backing the ClusterSecretStores."
+  type        = string
+  default     = null
+}
+
+variable "external_secrets_vault_approle_role_id" {
+  description = "Vault AppRole role_id used by every ClusterSecretStore to authenticate."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "external_secrets_vault_approle_secret_id" {
+  description = "Vault AppRole secret_id. Stored in a Kubernetes Secret and referenced by the ClusterSecretStores."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "external_secrets_vault_approle_auth_path" {
+  description = "Vault AppRole auth mount path."
+  type        = string
+  default     = "approle"
+}
+
+variable "external_secrets_cluster_secret_stores" {
+  description = "ClusterSecretStores to create (name => { path }), where path is the Vault KV v2 mount backing that store. All stores share the AppRole credentials above."
+  type = map(object({
+    path = string
+  }))
+  default = {}
+}
+
 # --- Gitea Actions ---
 
 variable "gitea_root_url" {
@@ -258,26 +397,37 @@ variable "gitea_runner_registration_token" {
 variable "chart_versions" {
   description = "Helm chart versions for platform components. Omitted keys use module defaults."
   type = object({
-    cilium        = optional(string)
-    cert_manager  = optional(string)
-    argocd        = optional(string)
-    external_dns  = optional(string)
-    reloader      = optional(string)
-    gitea_actions = optional(string)
+    cilium           = optional(string)
+    traefik          = optional(string)
+    cert_manager     = optional(string)
+    argocd           = optional(string)
+    external_dns     = optional(string)
+    reloader         = optional(string)
+    external_secrets = optional(string)
+    gitea_actions    = optional(string)
   })
   default = {}
 }
 
 locals {
   chart_versions = {
-    cilium        = coalesce(try(var.chart_versions.cilium, null), "1.20.2")
-    cert_manager  = coalesce(try(var.chart_versions.cert_manager, null), "v1.20.3")
-    argocd        = coalesce(try(var.chart_versions.argocd, null), "10.1.2")
-    external_dns  = coalesce(try(var.chart_versions.external_dns, null), "1.21.1")
-    reloader      = coalesce(try(var.chart_versions.reloader, null), "2.2.14")
-    gitea_actions = coalesce(try(var.chart_versions.gitea_actions, null), "0.1.1")
+    cilium           = coalesce(try(var.chart_versions.cilium, null), "1.20.2")
+    traefik          = coalesce(try(var.chart_versions.traefik, null), "41.0.2")
+    cert_manager     = coalesce(try(var.chart_versions.cert_manager, null), "v1.20.3")
+    argocd           = coalesce(try(var.chart_versions.argocd, null), "10.1.2")
+    external_dns     = coalesce(try(var.chart_versions.external_dns, null), "1.21.1")
+    reloader         = coalesce(try(var.chart_versions.reloader, null), "2.2.14")
+    external_secrets = coalesce(try(var.chart_versions.external_secrets, null), "2.8.0")
+    gitea_actions    = coalesce(try(var.chart_versions.gitea_actions, null), "0.1.1")
   }
 
   # Gateway TLS Certificate needs both the Gateway and cert-manager.
   enable_gateway_certificate = var.enable_gateway && var.enable_cert_manager
+
+  # Which controller implements the shared Gateway.
+  enable_cilium_gateway = var.enable_gateway && var.gateway_controller == "cilium"
+  enable_traefik        = var.enable_gateway && var.gateway_controller == "traefik"
+
+  # Traefik listens on its entryPoint ports behind its Service.
+  gateway_listener_ports = var.gateway_controller == "traefik" ? { http = 8000, https = 8443 } : { http = 80, https = 443 }
 }

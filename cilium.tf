@@ -18,7 +18,7 @@ locals {
     ipam                 = { mode = "kubernetes" }
     operator             = { replicas = 2 }
     bgpControlPlane      = { enabled = var.cilium_bgp != null }
-    gatewayAPI           = { enabled = var.enable_gateway }
+    gatewayAPI           = { enabled = local.enable_cilium_gateway }
   }
 
   cilium_peer_configs = var.cilium_bgp == null ? [] : [

@@ -61,11 +61,13 @@ session from the same node IP to the same router.
 | Flag | Component |
 |------|-----------|
 | `enable_cilium` (default `true`) | Cilium: CNI, kube-proxy replacement, LB IPAM, BGP control plane (`cilium_bgp`, `cilium_lb_ip_pools`, `cilium_bgp_advertisements`), Gateway API controller |
-| `enable_gateway` | Gateway API CRDs, the shared `public-gateway` (class `cilium`, listeners 80/443) and, with cert-manager, its TLS Certificate |
+| `enable_gateway` | Gateway API CRDs, the shared `public-gateway` (class per `gateway_controller`) and, with cert-manager, its TLS Certificate |
+| `gateway_controller` (default `cilium`) | Who implements the Gateway: `cilium` (listeners 80/443) or `traefik` (installs Traefik; listeners on its entryPoints 8000/8443). See [Without Cilium (GKE): Traefik](#without-cilium-gke-traefik) |
 | `enable_cert_manager` | cert-manager (Gateway API support on) + ClusterIssuers (HTTP-01 through the Gateway, DNS-01 on Cloud DNS) |
 | `enable_argocd` | Argo CD (HTTPRoute on the shared Gateway) + repo secret + bootstrap Application (`directory.recurse: true` on `gitops_path`) |
 | `enable_external_dns` | external-dns (GCP; Services and Gateway HTTPRoutes) |
 | `enable_reloader` | Stakater Reloader |
+| `enable_external_secrets` | External Secrets Operator + Vault AppRole Secret + `external_secrets_cluster_secret_stores` (ClusterSecretStores on Vault KV v2) |
 | `enable_gitea_actions` | Gitea Actions runners |
 
 ## One apply
@@ -181,6 +183,26 @@ See [`examples/complete`](examples/complete) for a full thin wrapper (providers,
   picks a pool by label and a fixed IP with the `lbipam.cilium.io/ips`
   annotation.
 
+### Without Cilium (GKE): Traefik
+
+On clusters that bring their own CNI and load balancers (GKE, EKS, ...), turn
+Cilium off and let Traefik implement the shared Gateway:
+
+```hcl
+  enable_cilium      = false
+  enable_gateway     = true
+  gateway_controller = "traefik"
+
+  traefik_load_balancer_ip = "203.0.113.10" # optional
+  # Trust X-Forwarded-For from the cloud LB / health checks (real client IP).
+  traefik_forwarded_trusted_ips = ["130.211.0.0/22", "35.191.0.0/16"]
+  # Raw-TCP entryPoints on the same LB IP (route with IngressRouteTCP), for
+  # GKE, which only allows the standard Gateway API channel (no TCPRoute).
+  traefik_tcp_listeners = { sftp = { port = 2222 } }
+  # Any other chart values, merged deeply.
+  traefik_values = {}
+```
+
 ## Upgrading from v0.x
 
 v1.0.0 removes:
@@ -202,7 +224,17 @@ It also changes:
   not an Ingress class.
 
 Switching a running cluster's CNI is a reinstall: build the cluster without a
-CNI and apply v1.0.0. Clusters that keep kube-vip/Traefik pin `?ref=v0.2.0`.
+CNI and apply v1.0.0.
+
+Clusters that keep Traefik (e.g. GKE) can move to v1.x without a reinstall:
+replace `enable_traefik_gateway = true` with `enable_cilium = false`,
+`enable_gateway = true` and `gateway_controller = "traefik"`. The Traefik
+resources keep their v0.x addresses (`helm_release.traefik`,
+`kubectl_manifest.gatewayclass_traefik`, `kubectl_manifest.public_gateway`),
+so no state moves are needed. To keep the plan empty, also pin
+`gateway_api_version = "v1.5.1"` (or upgrade deliberately) and set
+`create_gateway_namespace = false` if the namespace already exists.
+Clusters that keep kube-vip pin `?ref=v0.2.0`.
 
 ## Requirements
 
